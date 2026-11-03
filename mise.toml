@@ -1,2 +1,10 @@
 [settings]
 lockfile = true
+
+[tools]
+terraform = "1.17.1"
+
+[tasks.tf]
+description = "terraform/でterraformを実行する"
+dir = "{{config_root}}/terraform"
+run = "terraform"
