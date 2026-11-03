@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use rand::RngCore;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use worker::kv::KvStore;
 use worker::*;
