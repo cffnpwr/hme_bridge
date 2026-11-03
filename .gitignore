@@ -4,4 +4,5 @@
 /build
 .dev.vars
 cookie.json
+/.cloudflare
 .terraform/
