@@ -1,0 +1,23 @@
+[formatter.terraform]
+command = "terraform"
+options = ["fmt"]
+includes = ["*.tf", "*.tfvars"]
+
+[formatter.yaml]
+command = "yamlfmt"
+includes = ["*.yaml", "*.yml"]
+
+[formatter.markdown]
+command = "rumdl"
+options = ["fmt"]
+includes = ["*.md"]
+
+# NOTE: ESLintの自動修正で整形
+[formatter.typescript]
+command = "bun"
+options = ["run", "--bun", "eslint", "--fix"]
+includes = ["*.ts"]
+
+[formatter.rust]
+command = "rustfmt"
+includes = ["*.rs"]

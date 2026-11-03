@@ -2,8 +2,21 @@
 lockfile = true
 
 [tools]
+uv = "0.13.6"
+python = "3.14.8"
 terraform = "1.17.1"
+tflint = "0.65.0"
 bun = "1.4.4"
+yamllint = "1.38.0"
+rumdl = "v0.3.2"
+yamlfmt = "0.21.0"
+"aqua:numtide/treefmt" = "2.6.0"
+
+[tasks.fmt]
+description = "Terraform・YAML・Markdown・TypeScript・Rustを整形する"
+# NOTE: rustfmt.tomlの設定はnightlyのrustfmtでしか使えないため、整形するタスクだけnightlyのツールチェーンを使う
+tools = { rust = { version = "nightly-2026-11-03", profile = "minimal", components = ["rustfmt"] } }
+run = "treefmt"
 
 [tasks.tf]
 description = "terraform/でterraformを実行する"
@@ -11,6 +24,46 @@ dir = "{{config_root}}/terraform"
 run = "terraform"
 
 [tasks.lint]
+description = "Terraform・YAML・Markdown・TypeScript・Rustを検査する"
+depends = [
+  "lint:format",
+  "lint:terraform",
+  "lint:yaml",
+  "lint:markdown",
+  "lint:typescript",
+  "lint:rust",
+]
+
+[tasks."lint:format"]
+description = "整形済みであることを検査する"
+# NOTE: rustfmt.tomlの設定はnightlyのrustfmtでしか使えないため、整形するタスクだけnightlyのツールチェーンを使う
+tools = { rust = { version = "nightly-2026-11-03", profile = "minimal", components = ["rustfmt"] } }
+run = "treefmt --ci"
+
+[tasks."lint:terraform"]
+description = "Terraformを検査する"
+# NOTE: 実バックエンドで初期化済みの`.terraform`を使うと`init -backend=false`がR2の認証情報を要求するため、検査用のDataDirを指定
+#       相対パスはterraform/を基準に解決
+env = { TF_DATA_DIR = ".terraform/lint" }
+run = [
+  "mise run tf init -backend=false",
+  "mise run tf validate",
+  "tflint --chdir terraform --config \"$MISE_PROJECT_ROOT/.tflint.hcl\"",
+]
+
+[tasks."lint:yaml"]
+description = "YAMLを検査する"
+run = "yamllint ."
+
+[tasks."lint:markdown"]
+description = "Markdownを検査する"
+run = "rumdl check ."
+
+[tasks."lint:typescript"]
 description = "TypeScriptをESLintで検査する"
 # NOTE: BunはTypeScriptの設定ファイルを直接読み込めるため、eslint.config.tsの読み込みにjitiを使わないようBunで実行する
-run = "bunx --bun eslint ."
+run = "bun run --bun eslint ."
+
+[tasks."lint:rust"]
+description = "Rustをclippyで検査する"
+run = "cargo clippy --target wasm32-unknown-unknown -- -D warnings"
