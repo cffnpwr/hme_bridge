@@ -21,7 +21,7 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
 ### Prerequisites
 
 1. **Install the tools:**
-    Install Terraform and Bun with [mise](https://mise.jdx.dev), then install `cf` and Wrangler.
+   Install Terraform and Bun with [mise](https://mise.jdx.dev), then install `cf` and Wrangler.
 
     ```bash
     mise install
@@ -30,17 +30,17 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
 
 2. **Set the environment variables:**
 
-    | Variable | Description |
-    | --- | --- |
-    | `AWS_ACCESS_KEY_ID` | Access key ID of an R2 API token (for the S3 backend) |
-    | `AWS_SECRET_ACCESS_KEY` | Secret access key of an R2 API token (for the S3 backend) |
-    | `CLOUDFLARE_API_TOKEN` | API token for the Cloudflare Terraform provider, `cf`, and Wrangler |
+   | Variable | Description |
+   | --- | --- |
+   | `AWS_ACCESS_KEY_ID` | Access key ID of an R2 API token (for the S3 backend) |
+   | `AWS_SECRET_ACCESS_KEY` | Secret access key of an R2 API token (for the S3 backend) |
+   | `CLOUDFLARE_API_TOKEN` | API token for the Cloudflare Terraform provider, `cf`, and Wrangler |
 
 ### Initial Setup
 
 1. **Create the R2 bucket for the Terraform state:**
-    The bucket is managed by the same Terraform configuration.
-    Until the bucket exists, create a local state, then migrate it to the bucket.
+   The bucket is managed by the same Terraform configuration.
+   Until the bucket exists, create a local state, then migrate it to the bucket.
 
     1. Create `terraform/backend_override.tf` with the following content.
 
@@ -71,7 +71,7 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
     ```
 
 3. **Set the KV namespace ID:**
-    Replace the `id` of `HME_BRIDGE_CREDS` in `cloudflare.config.ts` with the output of the following command.
+   Replace the `id` of `HME_BRIDGE_CREDS` in `cloudflare.config.ts` with the output of the following command.
 
     ```bash
     mise run tf output -raw kv_namespace_id
@@ -273,13 +273,13 @@ Custom clients can use the token in two ways:
 
 1. **Via `authentication` header (like Bitwarden):**
 
-    ```
+    ```text
     authentication: <your_token>
     ```
 
 2. **Via `Authorization` header (Standard method):**
 
-    ```
+    ```text
     Authorization: Bearer <your_token>
     ```
 

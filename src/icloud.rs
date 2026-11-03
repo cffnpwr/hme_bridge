@@ -1,5 +1,6 @@
-use serde::Deserialize;
 use std::collections::HashMap;
+
+use serde::Deserialize;
 use url::Url;
 use wasm_bindgen::JsValue;
 use worker::{Fetch, Headers, Method, Request, RequestInit};
