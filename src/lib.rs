@@ -186,26 +186,21 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             let cookie_header = 'auth: {
                 // 1. Try Authorization: Bearer token header first
-                if let Ok(Some(auth_header)) = req.headers().get("authorization") {
-                    if let Some(token) = auth_header.strip_prefix("Bearer ") {
-                        let kv = match ctx.kv("HME_BRIDGE_CREDS") {
-                            Ok(kv) => kv,
-                            Err(_) => {
-                                break 'auth Err(Response::error("Internal Server Error", 500));
-                            }
-                        };
-                        if let Ok(Some(creds_json)) = kv.get(KV_KEY).text().await {
-                            if let Ok(creds) = serde_json::from_str::<Vec<Credential>>(&creds_json)
-                            {
-                                if let Some(cred) = creds.iter().find(|c| c.token == token) {
-                                    if let Ok(header) =
-                                        parse_cookies_from_json(&cred.cookie, keys_to_use)
-                                    {
-                                        break 'auth Ok(header);
-                                    }
-                                }
-                            }
+                if let Ok(Some(auth_header)) = req.headers().get("authorization")
+                    && let Some(token) = auth_header.strip_prefix("Bearer ")
+                {
+                    let kv = match ctx.kv("HME_BRIDGE_CREDS") {
+                        Ok(kv) => kv,
+                        Err(_) => {
+                            break 'auth Err(Response::error("Internal Server Error", 500));
                         }
+                    };
+                    if let Ok(Some(creds_json)) = kv.get(KV_KEY).text().await
+                        && let Ok(creds) = serde_json::from_str::<Vec<Credential>>(&creds_json)
+                        && let Some(cred) = creds.iter().find(|c| c.token == token)
+                        && let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use)
+                    {
+                        break 'auth Ok(header);
                     }
                 }
 
@@ -250,10 +245,10 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                         }
                     };
 
-                    if let Some(cred) = credentials.iter().find(|c| c.token == token) {
-                        if let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use) {
-                            break 'auth Ok(header);
-                        }
+                    if let Some(cred) = credentials.iter().find(|c| c.token == token)
+                        && let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use)
+                    {
+                        break 'auth Ok(header);
                     }
                 }
 
