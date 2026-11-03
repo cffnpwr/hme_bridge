@@ -1,21 +1,29 @@
 # HME Bridge for Cloudflare Workers
 
-This project acts as a bridge between Bitwarden's SimpleLogin integration and Apple's iCloud Hide My Email (HME) service, running on the Cloudflare Workers serverless platform.
+This project acts as a bridge between Bitwarden's SimpleLogin integration and Apple's iCloud Hide My Email (HME) service,
+running on the Cloudflare Workers serverless platform.
 
 ## Public Instance
 
-For those who wish to use this service without setting up their own deployment, a public instance is available for general use.
+For those who wish to use this service without setting up their own deployment,
+a public instance is available for general use.
 
 - **URL:** `https://hme-bridge-9hjgiu3hy.meru.workers.dev`
 
-To use it, simply follow the instructions for **`Method 1: Direct Cookie Authentication`**, and use the URL above for the **Self-host server URL** field in Bitwarden.
+To use it, simply follow the instructions for **`Method 1: Direct Cookie Authentication`**,
+and use the URL above for the **Self-host server URL** field in Bitwarden.
 
 > [!WARNING]
-> **Disclaimer:** Please be aware that when using the public instance, your iCloud cookie data is passed through this third-party server. While this instance is configured not to log or store your cookies, **self-hosting is strongly recommended for maximum security**. This service is provided as-is without any guarantee of uptime or long-term availability.
+> **Disclaimer:** Please be aware that when using the public instance,
+> your iCloud cookie data is passed through this third-party server.
+> While this instance is configured not to log or store your cookies,
+> **self-hosting is strongly recommended for maximum security**.
+> This service is provided as-is without any guarantee of uptime or long-term availability.
 
 ## How to Deploy
 
-The infrastructure (the Worker, the KV namespace, the custom domain, and the R2 bucket for the Terraform state) is managed with Terraform in `terraform/`.
+The infrastructure (the Worker, the KV namespace, the custom domain, and the R2 bucket for the Terraform state)
+is managed with Terraform in `terraform/`.
 The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://developers.cloudflare.com/cf/).
 
 ### Prerequisites
@@ -95,8 +103,11 @@ bunx wrangler secret put ADMIN_TOKEN --name hme-bridge
 
 This bridge supports two authentication methods:
 
-1. **Direct Cookie Authentication (Legacy):** Suitable for clients like Bitwarden that only support a single API key field. You pass the iCloud cookie JSON directly in the `authentication` header.
-2. **Centralized Token Authentication (Recommended):** A more secure and flexible method using a KV store to manage credentials. Clients authenticate using a short-lived token. This is ideal for multi-client or multi-account setups and is fully compatible with Bitwarden.
+1. **Direct Cookie Authentication (Legacy):** Suitable for clients like Bitwarden that only support a single API key field.
+   You pass the iCloud cookie JSON directly in the `authentication` header.
+2. **Centralized Token Authentication (Recommended):** A more secure and flexible method using a KV store to manage credentials.
+   Clients authenticate using a short-lived token.
+   This is ideal for multi-client or multi-account setups and is fully compatible with Bitwarden.
 
 ---
 
@@ -129,7 +140,8 @@ To authenticate with iCloud, you must provide three essential cookies from your 
     - `X-APPLE-DS-WEB-SESSION-TOKEN`
     - `X-APPLE-WEBAUTH-TOKEN`
     - `X-APPLE-WEBAUTH-USER`
-6. You can simply copy and paste the entire exported JSON directly into Bitwarden — the server-side parser will automatically extract the required tokens.
+6. You can simply copy and paste the entire exported JSON directly into Bitwarden —
+   the server-side parser will automatically extract the required tokens.
    However, if you prefer a stricter setup, create a new JSON array containing **only these three cookie objects**.
 7. Paste the resulting JSON array (or the full JSON if using the simple method) into the API Key field in Bitwarden.
 
@@ -162,20 +174,25 @@ To authenticate with iCloud, you must provide three essential cookies from your 
 
 ## Method 2: Centralized Token Authentication (Recommended)
 
-This method is more secure and flexible, allowing you to manage multiple accounts or clients. It is **fully compatible with Bitwarden**.
+This method is more secure and flexible, allowing you to manage multiple accounts or clients.
+It is **fully compatible with Bitwarden**.
 
 ### How it Works for Bitwarden Users
 
-Instead of pasting your full iCloud cookie data into Bitwarden's API Key field, you first store the cookie data in the bridge's secure KV store and generate a simple token. Then, you just use that short token as your API Key in Bitwarden.
+Instead of pasting your full iCloud cookie data into Bitwarden's API Key field,
+you first store the cookie data in the bridge's secure KV store and generate a simple token.
+Then, you just use that short token as your API Key in Bitwarden.
 
 This has two main benefits:
 
 - **Enhanced Security:** Your sensitive iCloud cookie is not stored in the Bitwarden client.
-- **Simplified Management:** If your cookie expires, you only need to update it in one place (the KV store), and all your clients (including Bitwarden) will work again without any changes.
+- **Simplified Management:** If your cookie expires, you only need to update it in one place (the KV store),
+  and all your clients (including Bitwarden) will work again without any changes.
 
 ### 1. Configure KV Namespace and Admin Token
 
-The KV namespace (`HME_BRIDGE_CREDS`) for storing credentials and the admin token (`ADMIN_TOKEN`) for managing them are set up in [How to Deploy](#how-to-deploy).
+The KV namespace (`HME_BRIDGE_CREDS`) for storing credentials and the admin token (`ADMIN_TOKEN`) for managing them
+are set up in [How to Deploy](#how-to-deploy).
 Choose a strong, random string for the admin token.
 
 For local testing with `cf dev`, a local KV namespace is used, and the admin token is read from `.dev.vars`.
@@ -186,7 +203,8 @@ echo 'ADMIN_TOKEN="your_super_secret_admin_token"' > .dev.vars
 
 ### 2. Manage Credentials via Admin API
 
-A full set of CRUD (Create, Read, Update, Delete) endpoints are provided to manage your credentials. All requests must include the `X-Admin-Token` header.
+A full set of CRUD (Create, Read, Update, Delete) endpoints are provided to manage your credentials.
+All requests must include the `X-Admin-Token` header.
 
 #### A. Create a New Credential
 
@@ -208,7 +226,8 @@ jq -n --arg label "My Personal Account" --argjson cookie "$(cat cookie.json)" \
 ```
 
 **Successful Response:**
-You will get a JSON response containing the new credential, including the generated `token`. Use this token in your client (e.g., Bitwarden API Key).
+You will get a JSON response containing the new credential, including the generated `token`.
+Use this token in your client (e.g., Bitwarden API Key).
 
 ```json
 {
@@ -265,7 +284,9 @@ curl -X DELETE https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b
 
 #### For Bitwarden Users
 
-After creating a credential and getting a token from the `POST /admin/credentials` endpoint, simply go to Bitwarden's generator settings and paste the returned **token** into the **API Key** field. The bridge will automatically detect that you are using a token and retrieve the corresponding cookie from the KV store.
+After creating a credential and getting a token from the `POST /admin/credentials` endpoint,
+simply go to Bitwarden's generator settings and paste the returned **token** into the **API Key** field.
+The bridge will automatically detect that you are using a token and retrieve the corresponding cookie from the KV store.
 
 #### For Custom Clients
 
