@@ -15,27 +15,81 @@ To use it, simply follow the instructions for **`Method 1: Direct Cookie Authent
 
 ## How to Deploy
 
-1. **Install Wrangler CLI:**
-    If you don't have it already, install the Cloudflare Wrangler CLI.
+The infrastructure (the Worker, the KV namespace, the custom domain, and the R2 bucket for the Terraform state) is managed with Terraform in `terraform/`.
+The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://developers.cloudflare.com/cf/).
+
+### Prerequisites
+
+1. **Install the tools:**
+    Install Terraform and Bun with [mise](https://mise.jdx.dev), then install `cf` and Wrangler.
 
     ```bash
-    npm install -g wrangler
+    mise install
+    bun install
     ```
 
-2. **Login to Cloudflare:**
+2. **Set the environment variables:**
+
+    | Variable | Description |
+    | --- | --- |
+    | `AWS_ACCESS_KEY_ID` | Access key ID of an R2 API token (for the S3 backend) |
+    | `AWS_SECRET_ACCESS_KEY` | Secret access key of an R2 API token (for the S3 backend) |
+    | `CLOUDFLARE_API_TOKEN` | API token for the Cloudflare Terraform provider, `cf`, and Wrangler |
+
+### Initial Setup
+
+1. **Create the R2 bucket for the Terraform state:**
+    The bucket is managed by the same Terraform configuration.
+    Until the bucket exists, create a local state, then migrate it to the bucket.
+
+    1. Create `terraform/backend_override.tf` with the following content.
+
+        ```hcl
+        terraform {
+          backend "local" {}
+        }
+        ```
+
+    2. Create the bucket.
+
+        ```bash
+        mise run tf init
+        mise run tf apply -target=cloudflare_r2_bucket.tfstate
+        ```
+
+    3. Delete `terraform/backend_override.tf`.
+    4. Migrate the state to the bucket.
+
+        ```bash
+        mise run tf init -migrate-state
+        ```
+
+2. **Create the infrastructure:**
 
     ```bash
-    wrangler login
+    mise run tf apply
     ```
 
-3. **Build and Deploy:**
-    Deploy the worker to your Cloudflare account.
+3. **Set the KV namespace ID:**
+    Replace the `id` of `HME_BRIDGE_CREDS` in `cloudflare.config.ts` with the output of the following command.
 
     ```bash
-    wrangler deploy
+    mise run tf output -raw kv_namespace_id
     ```
 
-    After deployment, Wrangler will output your worker's URL.
+### Build and Deploy
+
+Deploy the Worker.
+
+```bash
+bunx cf deploy
+```
+
+To set the admin token (`ADMIN_TOKEN`), use Wrangler, because `cf` cannot set a single secret yet.
+
+```bash
+bunx wrangler secret put ADMIN_TOKEN --name hme-bridge
+```
 
 ## Authentication Methods
 
@@ -121,42 +175,12 @@ This has two main benefits:
 
 ### 1. Configure KV Namespace and Admin Token
 
-First, you need to set up a Cloudflare KV namespace (for storing credentials) and a secret token (for managing them).
+The KV namespace (`HME_BRIDGE_CREDS`) for storing credentials and the admin token (`ADMIN_TOKEN`) for managing them are set up in [How to Deploy](#how-to-deploy).
+Choose a strong, random string for the admin token.
 
-#### A. Create KV Namespace
-
-Run the following commands in your terminal. The first command creates the KV namespace for production, and the second creates one for local testing with `wrangler dev`.
-
-```bash
-# For production
-wrangler kv:namespace create HME_BRIDGE_CREDS
-
-# For local testing
-wrangler kv:namespace create HME_BRIDGE_CREDS --preview
-```
-
-After running each command, Wrangler will output a configuration block. Copy and paste both blocks into your `wrangler.toml` file. It should look something like this:
-
-```toml
-# wrangler.toml
-[[kv_namespaces]]
-binding = "HME_BRIDGE_CREDS"
-id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-[[kv_namespaces]]
-binding = "HME_BRIDGE_CREDS"
-preview_id = "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-```
-
-#### B. Set Admin Token
-
-Next, set a secret token for the admin API. Choose a strong, random string.
+For local testing with `cf dev`, a local KV namespace is used, and the admin token is read from `.dev.vars`.
 
 ```bash
-# For production
-wrangler secret put ADMIN_TOKEN
-
-# For local testing (creates a .dev.vars file)
 echo 'ADMIN_TOKEN="your_super_secret_admin_token"' > .dev.vars
 ```
 
