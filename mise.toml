@@ -8,10 +8,17 @@ terraform = "1.17.1"
 tflint = "0.65.0"
 "aqua:suzuki-shunsuke/tfcmt" = "4.14.20"
 bun = "1.4.4"
+# NOTE: cfはcloudflare.config.tsの読み込みにNode.jsのmodule.registerHooksを使うため、Bunでは実行できない
+node = "26.13.0"
+# NOTE: miseのレジストリのcfはCloud Foundry CLIのため、npmのパッケージを指定
+#       cloudflare.config.tsがimportするcf/configは、package.jsonのcfを使う
+"npm:cf" = "1.0.0-beta.27"
+"cargo:worker-build" = "0.8.7"
 yamllint = "1.38.0"
 rumdl = "v0.3.2"
 yamlfmt = "0.21.0"
 "aqua:numtide/treefmt" = "2.6.0"
+jq = "1.8.2"
 
 [tasks.fmt]
 description = "Terraform・YAML・Markdown・TypeScript・Rustを整形する"
