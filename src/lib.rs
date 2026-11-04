@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use rand::RngCore;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use worker::kv::KvStore;
 use worker::*;
@@ -186,24 +186,21 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             let cookie_header = 'auth: {
                 // 1. Try Authorization: Bearer token header first
-                if let Ok(Some(auth_header)) = req.headers().get("authorization") {
-                    if let Some(token) = auth_header.strip_prefix("Bearer ") {
-                        let kv = match ctx.kv("HME_BRIDGE_CREDS") {
-                            Ok(kv) => kv,
-                            Err(_) => break 'auth Err(Response::error("Internal Server Error", 500)),
-                        };
-                        if let Ok(Some(creds_json)) = kv.get(KV_KEY).text().await {
-                            if let Ok(creds) = serde_json::from_str::<Vec<Credential>>(&creds_json)
-                            {
-                                if let Some(cred) = creds.iter().find(|c| c.token == token) {
-                                    if let Ok(header) =
-                                        parse_cookies_from_json(&cred.cookie, keys_to_use)
-                                    {
-                                        break 'auth Ok(header);
-                                    }
-                                }
-                            }
+                if let Ok(Some(auth_header)) = req.headers().get("authorization")
+                    && let Some(token) = auth_header.strip_prefix("Bearer ")
+                {
+                    let kv = match ctx.kv("HME_BRIDGE_CREDS") {
+                        Ok(kv) => kv,
+                        Err(_) => {
+                            break 'auth Err(Response::error("Internal Server Error", 500));
                         }
+                    };
+                    if let Ok(Some(creds_json)) = kv.get(KV_KEY).text().await
+                        && let Ok(creds) = serde_json::from_str::<Vec<Credential>>(&creds_json)
+                        && let Some(cred) = creds.iter().find(|c| c.token == token)
+                        && let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use)
+                    {
+                        break 'auth Ok(header);
                     }
                 }
 
@@ -248,10 +245,10 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                         }
                     };
 
-                    if let Some(cred) = credentials.iter().find(|c| c.token == token) {
-                        if let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use) {
-                            break 'auth Ok(header);
-                        }
+                    if let Some(cred) = credentials.iter().find(|c| c.token == token)
+                        && let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use)
+                    {
+                        break 'auth Ok(header);
                     }
                 }
 
@@ -305,13 +302,13 @@ fn parse_cookies_from_json(
     json_str: &str,
     keys: &[&str],
 ) -> std::result::Result<String, serde_json::Error> {
- let cookies: Vec<CookieObject> = match serde_json::from_str(json_str) {
-      Ok(list) => list,
-      Err(_) => {
-          let wrapper: CookieListWrapper = serde_json::from_str(json_str)?;
-          wrapper.cookies
-      }
-  };
+    let cookies: Vec<CookieObject> = match serde_json::from_str(json_str) {
+        Ok(list) => list,
+        Err(_) => {
+            let wrapper: CookieListWrapper = serde_json::from_str(json_str)?;
+            wrapper.cookies
+        }
+    };
     let cookie_header = cookies
         .into_iter()
         .filter(|c| keys.contains(&c.name.as_str()))
@@ -335,15 +332,10 @@ fn hme_to_alias(hme: HmeEmail) -> Alias {
         enabled: hme.is_active,
         creation_timestamp: hme.create_timestamp,
         creation_date: Utc
-                    .timestamp_millis_opt(hme.create_timestamp)
-                    .single()
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_else(|| {
-                        Utc.timestamp_millis_opt(0)
-                            .single()
-                            .unwrap()
-                            .to_rfc3339()
-                    }),
+            .timestamp_millis_opt(hme.create_timestamp)
+            .single()
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| Utc.timestamp_millis_opt(0).single().unwrap().to_rfc3339()),
         note: Some(hme.note),
         nb_block: 0,
         nb_forward: 0,

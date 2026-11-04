@@ -1,10 +1,22 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-	"packageRules": [
+  "extends": ["github>cffnpwr/renovate-config"],
+  "ignorePaths": [
+    // NOTE: `mise lock`で生成されるためignore
+    ".mise/locks/**"
+  ],
+  "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
-      "automerge": true
+      // NOTE: CLIはmise.tomlのcf、cloudflare.config.tsがimportするcf/configはpackage.jsonのcfを使うため、同じバージョンに揃える
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["cf"],
+      "groupName": "cf"
+    },
+    {
+      // NOTE: worker-buildはworkerクレートのバージョンがworker-build自身のメジャー・マイナーバージョン以上であることを要求するため、同時に更新する
+      "matchDatasources": ["crate"],
+      "matchPackageNames": ["worker", "worker-build"],
+      "groupName": "workers-rs"
     }
   ]
 }

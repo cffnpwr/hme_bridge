@@ -1,48 +1,191 @@
 # HME Bridge for Cloudflare Workers
 
-This project acts as a bridge between Bitwarden's SimpleLogin integration and Apple's iCloud Hide My Email (HME) service, running on the Cloudflare Workers serverless platform.
+This project acts as a bridge between Bitwarden's SimpleLogin integration and Apple's iCloud Hide My Email (HME) service,
+running on the Cloudflare Workers serverless platform.
 
 ## Public Instance
 
-For those who wish to use this service without setting up their own deployment, a public instance is available for general use.
+For those who wish to use this service without setting up their own deployment,
+a public instance is available for general use.
 
 - **URL:** `https://hme-bridge-9hjgiu3hy.meru.workers.dev`
 
-To use it, simply follow the instructions for **`Method 1: Direct Cookie Authentication`**, and use the URL above for the **Self-host server URL** field in Bitwarden.
+To use it, simply follow the instructions for **`Method 1: Direct Cookie Authentication`**,
+and use the URL above for the **Self-host server URL** field in Bitwarden.
 
 > [!WARNING]
-> **Disclaimer:** Please be aware that when using the public instance, your iCloud cookie data is passed through this third-party server. While this instance is configured not to log or store your cookies, **self-hosting is strongly recommended for maximum security**. This service is provided as-is without any guarantee of uptime or long-term availability.
+> **Disclaimer:** Please be aware that when using the public instance,
+> your iCloud cookie data is passed through this third-party server.
+> While this instance is configured not to log or store your cookies,
+> **self-hosting is strongly recommended for maximum security**.
+> This service is provided as-is without any guarantee of uptime or long-term availability.
 
 ## How to Deploy
 
-1. **Install Wrangler CLI:**
-    If you don't have it already, install the Cloudflare Wrangler CLI.
+The infrastructure (the Worker, the KV namespace, the custom domain, and the R2 bucket for the Terraform state)
+is managed with Terraform in `terraform/`.
+The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://developers.cloudflare.com/cf/).
+
+### Prerequisites
+
+1. **Install the tools:**
+   Install the tools with [mise](https://mise.jdx.dev), then install the packages.
 
     ```bash
-    npm install -g wrangler
+    mise install
+    bun install
     ```
 
-2. **Login to Cloudflare:**
+2. **Set the environment variables:**
+
+   | Variable | Description |
+   | --- | --- |
+   | `AWS_ACCESS_KEY_ID` | Access key ID of an R2 API token (for the S3 backend) |
+   | `AWS_SECRET_ACCESS_KEY` | Secret access key of an R2 API token (for the S3 backend) |
+   | `CLOUDFLARE_API_TOKEN` | API token for the Cloudflare Terraform provider, `cf`, and Wrangler |
+   | `TF_VAR_github_app_private_key` | Private key (PEM) of the GitHub App that CI uses for the GitHub Terraform provider |
+
+   The GitHub Terraform provider uses the token in the `GITHUB_TOKEN` environment variable,
+   or the token of `gh auth token` if it is not set.
+
+### Initial Setup
+
+1. **Create the R2 bucket for the Terraform state:**
+   The bucket is managed by the same Terraform configuration.
+   Until the bucket exists, create a local state, then migrate it to the bucket.
+
+    1. Create `terraform/backend_override.tf` with the following content.
+
+        ```hcl
+        terraform {
+          backend "local" {}
+        }
+        ```
+
+    2. Create the bucket.
+
+        ```bash
+        mise run tf init
+        mise run tf apply -target=cloudflare_r2_bucket.tfstate
+        ```
+
+    3. Delete `terraform/backend_override.tf`.
+    4. Migrate the state to the bucket.
+
+        ```bash
+        mise run tf init -migrate-state
+        ```
+
+2. **Create the Worker, the KV namespace, and the admin token:**
+   Cloudflare cannot attach a custom domain to a Worker that has no deployments.
+   Create the Worker, the KV namespace, and the admin token (`ADMIN_TOKEN`) first,
+   and deploy the Worker before creating the custom domain.
 
     ```bash
-    wrangler login
+    mise run tf apply \
+      -target=cloudflare_worker.hme_bridge \
+      -target=cloudflare_workers_kv_namespace.hme_bridge_creds \
+      -target=random_password.admin_token
     ```
 
-3. **Build and Deploy:**
-    Deploy the worker to your Cloudflare account.
+3. **Set the KV namespace ID:**
+   Replace the `id` of `HME_BRIDGE_CREDS` in `cloudflare.config.ts` with the output of the following command.
 
     ```bash
-    wrangler deploy
+    mise run tf output -raw kv_namespace_id
     ```
 
-    After deployment, Wrangler will output your worker's URL.
+4. **Deploy the Worker:**
+   The first deployment must upload the admin token,
+   because the Worker has no previous version to inherit the secret from.
+   Write the secrets that Terraform generated to a JSON file, deploy with it, and delete it.
+   The file has the following form.
+
+    ```json
+    {
+      "ADMIN_TOKEN": "<admin token>"
+    }
+    ```
+
+    ```bash
+    mise run tf output -json worker_secrets > worker-secrets.json
+    cf deploy --secrets-file worker-secrets.json
+    rm worker-secrets.json
+    ```
+
+5. **Create the rest of the infrastructure:**
+   Set `TF_VAR_cloudflare_api_token_read_write` to register the API token that CI uses for `terraform apply`.
+   See [CI](#ci) for the token.
+
+    ```bash
+    mise run tf apply
+    ```
+
+### Build and Deploy
+
+Deploy the Worker.
+The deployment keeps the admin token of the previous version.
+
+```bash
+cf deploy
+```
+
+Terraform generates the admin token (`ADMIN_TOKEN`).
+To get the admin token, run the following command.
+
+```bash
+mise run tf output -json worker_secrets | jq -r .ADMIN_TOKEN
+```
+
+To change the admin token, regenerate it with Terraform, then set it with Wrangler,
+because Terraform does not set the secrets of the Worker and `cf` cannot set a single secret yet.
+
+```bash
+mise run tf apply -replace=random_password.admin_token
+mise run tf output -json worker_secrets | bunx wrangler secret bulk --name hme-bridge
+```
+
+### CI
+
+Pull requests to `master` run `terraform plan`, and the plan is commented on the pull request.
+Pushes to `master` run `terraform apply` with `.github/workflows/terraform-apply.yaml`.
+
+Terraform creates the GitHub environments (`terraform-plan` and `terraform-apply`) and their secrets.
+The API token for `terraform plan` is created by Terraform.
+The API token for `terraform apply` is created on the Cloudflare dashboard,
+because an API token created with an API token cannot have the `Account API Tokens Write` permission.
+The token for `terraform apply` also needs permission to read and write the R2 bucket for the Terraform state,
+because the workflow creates the credentials for the S3 backend from this token.
+Terraform adds `[managed by terraform] hme_bridge/` to the names of the API tokens it creates.
+Do not add `[managed by terraform]` to the name of the API token created on the dashboard.
+
+CI runs the GitHub Terraform provider with a token of the GitHub App (the Client ID in the `UPDATE_CLIENT_ID` variable).
+Install the GitHub App on this repository with the following repository permissions.
+
+| Permission | Access | Used for |
+| --- | --- | --- |
+| Actions | Read-only | Reading the environments and the deployment branch policy |
+| Administration | Read and write | Creating and updating the environments and the deployment branch policy |
+| Environments | Read and write | The secrets of the environments |
+| Secrets | Read and write | The secrets of the repository |
+| Variables | Read and write | The variables of the repository |
+
+CI does not set `TF_VAR_cloudflare_api_token_read_write`, so Terraform ignores changes to the registered secret.
+To update the secret, set the new value to `TF_VAR_cloudflare_api_token_read_write` and apply it locally.
+
+```bash
+mise run tf apply -replace='github_actions_environment_secret.terraform_apply_cloudflare_api_token'
+```
 
 ## Authentication Methods
 
 This bridge supports two authentication methods:
 
-1. **Direct Cookie Authentication (Legacy):** Suitable for clients like Bitwarden that only support a single API key field. You pass the iCloud cookie JSON directly in the `authentication` header.
-2. **Centralized Token Authentication (Recommended):** A more secure and flexible method using a KV store to manage credentials. Clients authenticate using a short-lived token. This is ideal for multi-client or multi-account setups and is fully compatible with Bitwarden.
+1. **Direct Cookie Authentication (Legacy):** Suitable for clients like Bitwarden that only support a single API key field.
+   You pass the iCloud cookie JSON directly in the `authentication` header.
+2. **Centralized Token Authentication (Recommended):** A more secure and flexible method using a KV store to manage credentials.
+   Clients authenticate using a short-lived token.
+   This is ideal for multi-client or multi-account setups and is fully compatible with Bitwarden.
 
 ---
 
@@ -75,7 +218,8 @@ To authenticate with iCloud, you must provide three essential cookies from your 
     - `X-APPLE-DS-WEB-SESSION-TOKEN`
     - `X-APPLE-WEBAUTH-TOKEN`
     - `X-APPLE-WEBAUTH-USER`
-6. You can simply copy and paste the entire exported JSON directly into Bitwarden — the server-side parser will automatically extract the required tokens.
+6. You can simply copy and paste the entire exported JSON directly into Bitwarden —
+   the server-side parser will automatically extract the required tokens.
    However, if you prefer a stricter setup, create a new JSON array containing **only these three cookie objects**.
 7. Paste the resulting JSON array (or the full JSON if using the simple method) into the API Key field in Bitwarden.
 
@@ -108,61 +252,37 @@ To authenticate with iCloud, you must provide three essential cookies from your 
 
 ## Method 2: Centralized Token Authentication (Recommended)
 
-This method is more secure and flexible, allowing you to manage multiple accounts or clients. It is **fully compatible with Bitwarden**.
+This method is more secure and flexible, allowing you to manage multiple accounts or clients.
+It is **fully compatible with Bitwarden**.
 
 ### How it Works for Bitwarden Users
 
-Instead of pasting your full iCloud cookie data into Bitwarden's API Key field, you first store the cookie data in the bridge's secure KV store and generate a simple token. Then, you just use that short token as your API Key in Bitwarden.
+Instead of pasting your full iCloud cookie data into Bitwarden's API Key field,
+you first store the cookie data in the bridge's secure KV store and generate a simple token.
+Then, you just use that short token as your API Key in Bitwarden.
 
 This has two main benefits:
 
 - **Enhanced Security:** Your sensitive iCloud cookie is not stored in the Bitwarden client.
-- **Simplified Management:** If your cookie expires, you only need to update it in one place (the KV store), and all your clients (including Bitwarden) will work again without any changes.
+- **Simplified Management:** If your cookie expires, you only need to update it in one place (the KV store),
+  and all your clients (including Bitwarden) will work again without any changes.
 
 ### 1. Configure KV Namespace and Admin Token
 
-First, you need to set up a Cloudflare KV namespace (for storing credentials) and a secret token (for managing them).
+The KV namespace (`HME_BRIDGE_CREDS`) for storing credentials and the admin token (`ADMIN_TOKEN`) for managing them
+are set up in [How to Deploy](#how-to-deploy).
+Choose a strong, random string for the admin token.
 
-#### A. Create KV Namespace
-
-Run the following commands in your terminal. The first command creates the KV namespace for production, and the second creates one for local testing with `wrangler dev`.
-
-```bash
-# For production
-wrangler kv:namespace create HME_BRIDGE_CREDS
-
-# For local testing
-wrangler kv:namespace create HME_BRIDGE_CREDS --preview
-```
-
-After running each command, Wrangler will output a configuration block. Copy and paste both blocks into your `wrangler.toml` file. It should look something like this:
-
-```toml
-# wrangler.toml
-[[kv_namespaces]]
-binding = "HME_BRIDGE_CREDS"
-id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-[[kv_namespaces]]
-binding = "HME_BRIDGE_CREDS"
-preview_id = "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
-```
-
-#### B. Set Admin Token
-
-Next, set a secret token for the admin API. Choose a strong, random string.
+For local testing with `cf dev`, a local KV namespace is used, and the admin token is read from `.dev.vars`.
 
 ```bash
-# For production
-wrangler secret put ADMIN_TOKEN
-
-# For local testing (creates a .dev.vars file)
 echo 'ADMIN_TOKEN="your_super_secret_admin_token"' > .dev.vars
 ```
 
 ### 2. Manage Credentials via Admin API
 
-A full set of CRUD (Create, Read, Update, Delete) endpoints are provided to manage your credentials. All requests must include the `X-Admin-Token` header.
+A full set of CRUD (Create, Read, Update, Delete) endpoints are provided to manage your credentials.
+All requests must include the `X-Admin-Token` header.
 
 #### A. Create a New Credential
 
@@ -178,13 +298,14 @@ This endpoint will add a new credential to the store and return it with a random
 jq -n --arg label "My Personal Account" --argjson cookie "$(cat cookie.json)" \
   '{"label": $label, "cookie": $cookie}' | \
   curl -X POST https://your-worker.workers.dev/admin/credentials \
-    -H "X-Admin-Token: your_super_secret_admin_token" \
+    -H 'X-Admin-Token: your_super_secret_admin_token' \
     -H "Content-Type: application/json" \
     -d @-
 ```
 
 **Successful Response:**
-You will get a JSON response containing the new credential, including the generated `token`. Use this token in your client (e.g., Bitwarden API Key).
+You will get a JSON response containing the new credential, including the generated `token`.
+Use this token in your client (e.g., Bitwarden API Key).
 
 ```json
 {
@@ -202,7 +323,7 @@ You will get a JSON response containing the new credential, including the genera
 
 ```bash
 curl https://your-worker.workers.dev/admin/credentials \
-  -H "X-Admin-Token: your_super_secret_admin_token"
+  -H 'X-Admin-Token: your_super_secret_admin_token'
 ```
 
 **Successful Response:** An array of all stored credential objects.
@@ -219,7 +340,7 @@ curl https://your-worker.workers.dev/admin/credentials \
 jq -n --arg label "My Updated Account" --argjson cookie "$(cat new_cookie.json)" \
   '{"label": $label, "cookie": $cookie}' | \
   curl -X PUT https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 \
-    -H "X-Admin-Token: your_super_secret_admin_token" \
+    -H 'X-Admin-Token: your_super_secret_admin_token' \
     -H "Content-Type: application/json" \
     -d @-
 ```
@@ -232,7 +353,7 @@ jq -n --arg label "My Updated Account" --argjson cookie "$(cat new_cookie.json)"
 
 ```bash
 curl -X DELETE https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 \
-  -H "X-Admin-Token: your_super_secret_admin_token"
+  -H 'X-Admin-Token: your_super_secret_admin_token'
 ```
 
 **Successful Response:** A simple text message like `Credential deleted`.
@@ -241,7 +362,9 @@ curl -X DELETE https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b
 
 #### For Bitwarden Users
 
-After creating a credential and getting a token from the `POST /admin/credentials` endpoint, simply go to Bitwarden's generator settings and paste the returned **token** into the **API Key** field. The bridge will automatically detect that you are using a token and retrieve the corresponding cookie from the KV store.
+After creating a credential and getting a token from the `POST /admin/credentials` endpoint,
+simply go to Bitwarden's generator settings and paste the returned **token** into the **API Key** field.
+The bridge will automatically detect that you are using a token and retrieve the corresponding cookie from the KV store.
 
 #### For Custom Clients
 
@@ -249,13 +372,13 @@ Custom clients can use the token in two ways:
 
 1. **Via `authentication` header (like Bitwarden):**
 
-    ```
+    ```text
     authentication: <your_token>
     ```
 
 2. **Via `Authorization` header (Standard method):**
 
-    ```
+    ```text
     Authorization: Bearer <your_token>
     ```
 
