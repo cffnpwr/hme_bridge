@@ -292,13 +292,12 @@ This endpoint will add a new credential to the store and return it with a random
 - **Body:** A JSON object with a `label` (a friendly name for the credential) and the `cookie` data (as a JSON array).
 
 **Example `curl` command:**
-(Assumes your cookie data is in a file named `cookie.json`)
+(Assumes your cookie data is in a file named `cookies.json`)
 
 ```bash
-jq -n --arg label "My Personal Account" --argjson cookie "$(cat cookie.json)" \
-  '{"label": $label, "cookie": $cookie}' | \
-  curl -X POST https://your-worker.workers.dev/admin/credentials \
-    -H 'X-Admin-Token: your_super_secret_admin_token' \
+jq --arg label "<label>" '{"label": $label, "cookie": .}' cookies.json | \
+  curl -X POST "https://$(mise run tf output -raw worker_domain)/admin/credentials" \
+    -H "X-Admin-Token: $(mise run tf output -json worker_secrets | jq -r .ADMIN_TOKEN)" \
     -H "Content-Type: application/json" \
     -d @-
 ```
@@ -322,8 +321,8 @@ Use this token in your client (e.g., Bitwarden API Key).
 **Example `curl` command:**
 
 ```bash
-curl https://your-worker.workers.dev/admin/credentials \
-  -H 'X-Admin-Token: your_super_secret_admin_token'
+curl "https://$(mise run tf output -raw worker_domain)/admin/credentials" \
+  -H "X-Admin-Token: $(mise run tf output -json worker_secrets | jq -r .ADMIN_TOKEN)"
 ```
 
 **Successful Response:** An array of all stored credential objects.
@@ -337,10 +336,9 @@ curl https://your-worker.workers.dev/admin/credentials \
 (Updates the credential with the token `a1b2c3d4...`, using cookie data from `new_cookie.json`)
 
 ```bash
-jq -n --arg label "My Updated Account" --argjson cookie "$(cat new_cookie.json)" \
-  '{"label": $label, "cookie": $cookie}' | \
-  curl -X PUT https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 \
-    -H 'X-Admin-Token: your_super_secret_admin_token' \
+jq --arg label "<label>" '{"label": $label, "cookie": .}' new_cookie.json | \
+  curl -X PUT "https://$(mise run tf output -raw worker_domain)/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4" \
+    -H "X-Admin-Token: $(mise run tf output -json worker_secrets | jq -r .ADMIN_TOKEN)" \
     -H "Content-Type: application/json" \
     -d @-
 ```
@@ -352,8 +350,8 @@ jq -n --arg label "My Updated Account" --argjson cookie "$(cat new_cookie.json)"
 **Example `curl` command:**
 
 ```bash
-curl -X DELETE https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 \
-  -H 'X-Admin-Token: your_super_secret_admin_token'
+curl -X DELETE "https://$(mise run tf output -raw worker_domain)/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4" \
+  -H "X-Admin-Token: $(mise run tf output -json worker_secrets | jq -r .ADMIN_TOKEN)"
 ```
 
 **Successful Response:** A simple text message like `Credential deleted`.
