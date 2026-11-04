@@ -76,12 +76,16 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
         mise run tf init -migrate-state
         ```
 
-2. **Create the infrastructure:**
-   Set `TF_VAR_cloudflare_api_token_read_write` to register the API token that CI uses for `terraform apply`.
-   See [CI](#ci) for the token.
+2. **Create the Worker, the KV namespace, and the admin token:**
+   Cloudflare cannot attach a custom domain to a Worker that has no deployments.
+   Create the Worker, the KV namespace, and the admin token (`ADMIN_TOKEN`) first,
+   and deploy the Worker before creating the custom domain.
 
     ```bash
-    mise run tf apply
+    mise run tf apply \
+      -target=cloudflare_worker.hme_bridge \
+      -target=cloudflare_workers_kv_namespace.hme_bridge_creds \
+      -target=random_password.admin_token
     ```
 
 3. **Set the KV namespace ID:**
@@ -91,18 +95,54 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
     mise run tf output -raw kv_namespace_id
     ```
 
+4. **Deploy the Worker:**
+   The first deployment must upload the admin token,
+   because the Worker has no previous version to inherit the secret from.
+   Write the secrets that Terraform generated to a JSON file, deploy with it, and delete it.
+   The file has the following form.
+
+    ```json
+    {
+      "ADMIN_TOKEN": "<admin token>"
+    }
+    ```
+
+    ```bash
+    mise run tf output -json worker_secrets > worker-secrets.json
+    cf deploy --secrets-file worker-secrets.json
+    rm worker-secrets.json
+    ```
+
+5. **Create the rest of the infrastructure:**
+   Set `TF_VAR_cloudflare_api_token_read_write` to register the API token that CI uses for `terraform apply`.
+   See [CI](#ci) for the token.
+
+    ```bash
+    mise run tf apply
+    ```
+
 ### Build and Deploy
 
 Deploy the Worker.
+The deployment keeps the admin token of the previous version.
 
 ```bash
 cf deploy
 ```
 
-To set the admin token (`ADMIN_TOKEN`), use Wrangler, because `cf` cannot set a single secret yet.
+Terraform generates the admin token (`ADMIN_TOKEN`).
+To get the admin token, run the following command.
 
 ```bash
-bunx wrangler secret put ADMIN_TOKEN --name hme-bridge
+mise run tf output -json worker_secrets | jq -r .ADMIN_TOKEN
+```
+
+To change the admin token, regenerate it with Terraform, then set it with Wrangler,
+because Terraform does not set the secrets of the Worker and `cf` cannot set a single secret yet.
+
+```bash
+mise run tf apply -replace=random_password.admin_token
+mise run tf output -json worker_secrets | bunx wrangler secret bulk --name hme-bridge
 ```
 
 ### CI
