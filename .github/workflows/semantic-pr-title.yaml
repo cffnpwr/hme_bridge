@@ -1,0 +1,12 @@
+name: Semantic PR title
+on:
+  pull_request:
+    branches:
+      - master
+    types: [opened, edited, reopened, synchronize]
+permissions: {}
+jobs:
+  semantic-pr-title:
+    permissions:
+      pull-requests: read
+    uses: cffnpwr/actions/.github/workflows/semantic-pr-title.yaml@0988a4a402a9ce38fd34414cdceb011e8e2be9fc # main
