@@ -11,3 +11,8 @@ output "worker_secrets" {
   }
   sensitive = true
 }
+
+output "worker_domain" {
+  description = "Workerが使用するドメイン"
+  value       = cloudflare_workers_custom_domain.hme_bridge.hostname
+}
