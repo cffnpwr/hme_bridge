@@ -15,3 +15,9 @@ resource "cloudflare_workers_custom_domain" "hme_bridge" {
   hostname   = "hme-bridge.${data.cloudflare_zone.cffnpwr_dev.name}"
   service    = cloudflare_worker.hme_bridge.name
 }
+
+# NOTE: Cloudflare providerにはWorkerのシークレットだけを設定するリソースが無いため、値の生成だけを行なう
+#       Workerへの設定は、`worker_secrets`のoutputを`cf deploy`・`wrangler secret bulk`に渡して行なう
+resource "random_password" "admin_token" {
+  length = 64
+}
