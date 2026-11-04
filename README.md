@@ -43,6 +43,10 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
    | `AWS_ACCESS_KEY_ID` | Access key ID of an R2 API token (for the S3 backend) |
    | `AWS_SECRET_ACCESS_KEY` | Secret access key of an R2 API token (for the S3 backend) |
    | `CLOUDFLARE_API_TOKEN` | API token for the Cloudflare Terraform provider, `cf`, and Wrangler |
+   | `TF_VAR_github_app_private_key` | Private key (PEM) of the GitHub App that CI uses for the GitHub Terraform provider |
+
+   The GitHub Terraform provider uses the token in the `GITHUB_TOKEN` environment variable,
+   or the token of `gh auth token` if it is not set.
 
 ### Initial Setup
 
@@ -73,6 +77,8 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
         ```
 
 2. **Create the infrastructure:**
+   Set `TF_VAR_cloudflare_api_token_read_write` to register the API token that CI uses for `terraform apply`.
+   See [CI](#ci) for the token.
 
     ```bash
     mise run tf apply
@@ -97,6 +103,38 @@ To set the admin token (`ADMIN_TOKEN`), use Wrangler, because `cf` cannot set a 
 
 ```bash
 bunx wrangler secret put ADMIN_TOKEN --name hme-bridge
+```
+
+### CI
+
+Pull requests to `master` run `terraform plan`, and the plan is commented on the pull request.
+Pushes to `master` run `terraform apply` with `.github/workflows/terraform-apply.yaml`.
+
+Terraform creates the GitHub environments (`terraform-plan` and `terraform-apply`) and their secrets.
+The API token for `terraform plan` is created by Terraform.
+The API token for `terraform apply` is created on the Cloudflare dashboard,
+because an API token created with an API token cannot have the `Account API Tokens Write` permission.
+The token for `terraform apply` also needs permission to read and write the R2 bucket for the Terraform state,
+because the workflow creates the credentials for the S3 backend from this token.
+Terraform adds `[managed by terraform] hme_bridge/` to the names of the API tokens it creates.
+Do not add `[managed by terraform]` to the name of the API token created on the dashboard.
+
+CI runs the GitHub Terraform provider with a token of the GitHub App (the Client ID in the `UPDATE_CLIENT_ID` variable).
+Install the GitHub App on this repository with the following repository permissions.
+
+| Permission | Access | Used for |
+| --- | --- | --- |
+| Actions | Read-only | Reading the environments and the deployment branch policy |
+| Administration | Read and write | Creating and updating the environments and the deployment branch policy |
+| Environments | Read and write | The secrets of the environments |
+| Secrets | Read and write | The secrets of the repository |
+| Variables | Read and write | The variables of the repository |
+
+CI does not set `TF_VAR_cloudflare_api_token_read_write`, so Terraform ignores changes to the registered secret.
+To update the secret, set the new value to `TF_VAR_cloudflare_api_token_read_write` and apply it locally.
+
+```bash
+mise run tf apply -replace='github_actions_environment_secret.terraform_apply_cloudflare_api_token'
 ```
 
 ## Authentication Methods
