@@ -7,12 +7,11 @@ export default defineConfig({
     entrypoint: "build/worker/shim.mjs",
     env: {
       /*
-       * NOTE: KV namespaceはTerraformで作成するため、IDには次のコマンドの値を記載する
-       *       `mise run tf output -raw kv_namespace_id`
-       *       `cf dev`ではこのIDを使わず、ローカルのKVを使う
+       * NOTE: KV namespaceはTerraformで作成するため、
+       *       IDには`mise run tf output -raw kv_namespace_id`の値を記載する
        */
       HME_BRIDGE_CREDS: bindings.kv({
-        id: "dummy-id-for-local-testing",
+        id: "5779685861724952841adea924e863c9",
       }),
       ADMIN_TOKEN: bindings.secret(),
     },
