@@ -298,7 +298,7 @@ This endpoint will add a new credential to the store and return it with a random
 jq -n --arg label "My Personal Account" --argjson cookie "$(cat cookie.json)" \
   '{"label": $label, "cookie": $cookie}' | \
   curl -X POST https://your-worker.workers.dev/admin/credentials \
-    -H "X-Admin-Token: your_super_secret_admin_token" \
+    -H 'X-Admin-Token: your_super_secret_admin_token' \
     -H "Content-Type: application/json" \
     -d @-
 ```
@@ -323,7 +323,7 @@ Use this token in your client (e.g., Bitwarden API Key).
 
 ```bash
 curl https://your-worker.workers.dev/admin/credentials \
-  -H "X-Admin-Token: your_super_secret_admin_token"
+  -H 'X-Admin-Token: your_super_secret_admin_token'
 ```
 
 **Successful Response:** An array of all stored credential objects.
@@ -340,7 +340,7 @@ curl https://your-worker.workers.dev/admin/credentials \
 jq -n --arg label "My Updated Account" --argjson cookie "$(cat new_cookie.json)" \
   '{"label": $label, "cookie": $cookie}' | \
   curl -X PUT https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 \
-    -H "X-Admin-Token: your_super_secret_admin_token" \
+    -H 'X-Admin-Token: your_super_secret_admin_token' \
     -H "Content-Type: application/json" \
     -d @-
 ```
@@ -353,7 +353,7 @@ jq -n --arg label "My Updated Account" --argjson cookie "$(cat new_cookie.json)"
 
 ```bash
 curl -X DELETE https://your-worker.workers.dev/admin/credentials/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4 \
-  -H "X-Admin-Token: your_super_secret_admin_token"
+  -H 'X-Admin-Token: your_super_secret_admin_token'
 ```
 
 **Successful Response:** A simple text message like `Credential deleted`.
