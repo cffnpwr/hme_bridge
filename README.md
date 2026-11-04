@@ -29,7 +29,7 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
 ### Prerequisites
 
 1. **Install the tools:**
-   Install Terraform and Bun with [mise](https://mise.jdx.dev), then install `cf` and Wrangler.
+   Install the tools with [mise](https://mise.jdx.dev), then install the packages.
 
     ```bash
     mise install
@@ -96,7 +96,7 @@ The Worker code is built and deployed with the [Cloudflare CLI (`cf`)](https://d
 Deploy the Worker.
 
 ```bash
-bunx cf deploy
+cf deploy
 ```
 
 To set the admin token (`ADMIN_TOKEN`), use Wrangler, because `cf` cannot set a single secret yet.
