@@ -8,6 +8,7 @@ mod icloud;
 use crate::icloud::HmeEmail;
 
 const KV_KEY: &str = "credentials";
+const LOG_LEVEL: log::Level = log::Level::Info;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct Credential {
@@ -48,9 +49,9 @@ async fn save_credentials(kv: &KvStore, creds: &[Credential]) -> Result<()> {
 }
 
 fn log_request(req: &Request) {
-    console_log!(
+    log::info!(
         "{} - [{}], located at: {:?}, within: {}",
-        Date::now().to_string(),
+        Date::now(),
         req.path(),
         req.cf().and_then(|cf| cf.coordinates()).unwrap_or_default(),
         req.cf()
@@ -71,6 +72,11 @@ async fn admin_auth(req: &Request, ctx: &RouteContext<()>) -> Result<KvStore> {
     }
 
     ctx.kv("HME_BRIDGE_CREDS")
+}
+
+#[event(start)]
+fn init_logger() {
+    console_log::init_with_level(LOG_LEVEL).expect("logger is initialized only once at startup");
 }
 
 #[event(fetch)]
@@ -283,7 +289,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                     Response::from_json(&alias)
                 }
                 Err(e) => {
-                    console_error!("Failed to generate HME: {}", e);
+                    log::error!("Failed to generate HME: {}", e);
                     Response::error(format!("Internal Server Error: {}", e), 500)
                 }
             }
