@@ -8,6 +8,7 @@ mod icloud;
 use crate::icloud::HmeEmail;
 
 const KV_KEY: &str = "credentials";
+const LOG_LEVEL: log::Level = log::Level::Info;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct Credential {
@@ -25,6 +26,20 @@ struct CredentialRequest {
 #[derive(Deserialize)]
 struct CookieListWrapper {
     cookies: Vec<CookieObject>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum TokenLookupError {
+    #[error("failed to read credentials from KV")]
+    KvRead(#[source] kv::KvError),
+    #[error("no credentials are stored in KV")]
+    NoCredentials,
+    #[error("stored credentials are not valid JSON")]
+    InvalidFormat(#[source] serde_json::Error),
+    #[error("token is not found in stored credentials")]
+    NotFound,
+    #[error("stored cookie is not valid JSON")]
+    InvalidCookie(#[source] serde_json::Error),
 }
 
 fn generate_token() -> String {
@@ -47,10 +62,40 @@ async fn save_credentials(kv: &KvStore, creds: &[Credential]) -> Result<()> {
     kv.put(KV_KEY, json)?.execute().await.map_err(|e| e.into())
 }
 
+async fn lookup_cookie_header(
+    kv: &KvStore,
+    token: &str,
+    keys: &[&str],
+) -> std::result::Result<String, TokenLookupError> {
+    let creds_json = kv
+        .get(KV_KEY)
+        .text()
+        .await
+        .map_err(TokenLookupError::KvRead)?
+        .ok_or(TokenLookupError::NoCredentials)?;
+    let creds: Vec<Credential> =
+        serde_json::from_str(&creds_json).map_err(TokenLookupError::InvalidFormat)?;
+    let cred = creds
+        .iter()
+        .find(|c| c.token == token)
+        .ok_or(TokenLookupError::NotFound)?;
+    parse_cookies_from_json(&cred.cookie, keys).map_err(TokenLookupError::InvalidCookie)
+}
+
+fn format_error_chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(e) = source {
+        message.push_str(&format!(": {}", e));
+        source = e.source();
+    }
+    message
+}
+
 fn log_request(req: &Request) {
-    console_log!(
+    log::info!(
         "{} - [{}], located at: {:?}, within: {}",
-        Date::now().to_string(),
+        Date::now(),
         req.path(),
         req.cf().and_then(|cf| cf.coordinates()).unwrap_or_default(),
         req.cf()
@@ -71,6 +116,11 @@ async fn admin_auth(req: &Request, ctx: &RouteContext<()>) -> Result<KvStore> {
     }
 
     ctx.kv("HME_BRIDGE_CREDS")
+}
+
+#[event(start)]
+fn init_logger() {
+    console_log::init_with_level(LOG_LEVEL).expect("logger is initialized only once at startup");
 }
 
 #[event(fetch)]
@@ -191,28 +241,30 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 {
                     let kv = match ctx.kv("HME_BRIDGE_CREDS") {
                         Ok(kv) => kv,
-                        Err(_) => {
+                        Err(e) => {
+                            log::error!("[auth] failed to get KV binding: {}", e);
                             break 'auth Err(Response::error("Internal Server Error", 500));
                         }
                     };
-                    if let Ok(Some(creds_json)) = kv.get(KV_KEY).text().await
-                        && let Ok(creds) = serde_json::from_str::<Vec<Credential>>(&creds_json)
-                        && let Some(cred) = creds.iter().find(|c| c.token == token)
-                        && let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use)
-                    {
-                        break 'auth Ok(header);
+                    match lookup_cookie_header(&kv, token, keys_to_use).await {
+                        Ok(header) => break 'auth Ok(header),
+                        Err(e) => log::warn!("[auth] Bearer token lookup failed: {}", format_error_chain(&e)),
                     }
                 }
 
                 // 2. Try `authentication` header (for Bitwarden)
                 if let Ok(Some(api_key)) = req.headers().get("authentication") {
                     if api_key.is_empty() {
+                        log::warn!("[auth] authentication header is empty");
                         break 'auth Err(Response::error("Authentication header is empty", 401));
                     }
 
                     // Try parsing as JSON cookie first
                     if let Ok(header) = parse_cookies_from_json(&api_key, keys_to_use) {
                         if header.is_empty() {
+                            log::warn!(
+                                "[auth] cookie JSON in authentication header has no required iCloud cookies"
+                            );
                             break 'auth Err(Response::error(
                                 "Invalid cookie payload: required iCloud cookies not found",
                                 400,
@@ -222,36 +274,38 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                     }
 
                     // If not JSON, treat as a token and look up in KV
-                    let token = api_key;
                     let kv = match ctx.kv("HME_BRIDGE_CREDS") {
                         Ok(kv) => kv,
-                        Err(_) => {
+                        Err(e) => {
+                            log::error!("[auth] failed to get KV binding: {}", e);
                             break 'auth Err(Response::error("Internal Server Error", 500));
                         }
                     };
 
-                    let credentials_json = match kv.get(KV_KEY).text().await {
-                        Ok(Some(json)) => json,
-                        _ => {
-                            break 'auth Err(Response::error("Invalid credentials", 401));
+                    match lookup_cookie_header(&kv, &api_key, keys_to_use).await {
+                        Ok(header) => break 'auth Ok(header),
+                        Err(e) => {
+                            log::warn!(
+                                "[auth] authentication token lookup failed: {}",
+                                format_error_chain(&e)
+                            );
+                            match e {
+                                TokenLookupError::KvRead(_) | TokenLookupError::NoCredentials => {
+                                    break 'auth Err(Response::error("Invalid credentials", 401));
+                                }
+                                TokenLookupError::InvalidFormat(_) => {
+                                    break 'auth Err(Response::error(
+                                        "Invalid credentials format",
+                                        500,
+                                    ));
+                                }
+                                TokenLookupError::NotFound | TokenLookupError::InvalidCookie(_) => {}
+                            }
                         }
-                    };
-
-                    let credentials: Vec<Credential> = match serde_json::from_str(&credentials_json)
-                    {
-                        Ok(creds) => creds,
-                        Err(_) => {
-                            break 'auth Err(Response::error("Invalid credentials format", 500));
-                        }
-                    };
-
-                    if let Some(cred) = credentials.iter().find(|c| c.token == token)
-                        && let Ok(header) = parse_cookies_from_json(&cred.cookie, keys_to_use)
-                    {
-                        break 'auth Ok(header);
                     }
                 }
 
+                log::warn!("[auth] no valid Authorization or authentication header");
                 break 'auth Err(Response::error(
                     "Authentication header is missing or invalid",
                     401,
@@ -264,12 +318,16 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             };
 
             if cookie_header.is_empty() {
+                log::warn!("[auth] stored credential has no required iCloud cookies");
                 return Response::error("Required cookies not found in stored credential", 500);
             }
 
             let payload: CreateAliasRequest = match req.json().await {
                 Ok(p) => p,
-                Err(_) => return Response::error("Bad request", 400),
+                Err(e) => {
+                    log::warn!("[request] failed to parse request body: {}", e);
+                    return Response::error("Bad request", 400);
+                }
             };
 
             let note = payload
@@ -283,7 +341,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
                     Response::from_json(&alias)
                 }
                 Err(e) => {
-                    console_error!("Failed to generate HME: {}", e);
+                    log::error!("Failed to generate HME: {}", e);
                     Response::error(format!("Internal Server Error: {}", e), 500)
                 }
             }

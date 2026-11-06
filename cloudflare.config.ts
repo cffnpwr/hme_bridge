@@ -5,6 +5,11 @@ export default defineConfig({
     name: "hme-bridge",
     compatibilityDate: "2025-08-23",
     entrypoint: "build/worker/shim.mjs",
+    observability: {
+      logs: {
+        enabled: true,
+      },
+    },
     env: {
       /*
        * NOTE: KV namespaceはTerraformで作成するため、

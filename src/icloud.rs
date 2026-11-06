@@ -44,11 +44,46 @@ struct PremiumMailSettingsResponse<T> {
     error: Option<serde_json::Value>,
 }
 
+#[derive(Clone, Copy)]
+enum ApiStage {
+    Validate,
+    Generate,
+    Reserve,
+}
+
+struct ApiResponse<T> {
+    status: u16,
+    body: String,
+    json: T,
+}
+
+impl std::fmt::Display for ApiStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Validate => "validate",
+            Self::Generate => "generate",
+            Self::Reserve => "reserve",
+        };
+        f.write_str(name)
+    }
+}
+
+fn log_failure(stage: ApiStage, status: u16, body: &str, reason: &str) {
+    log::error!(
+        "[icloud:{}] {} (status: {}, body: {})",
+        stage,
+        reason,
+        status,
+        body
+    );
+}
+
 async fn post<T: for<'de> Deserialize<'de>>(
+    stage: ApiStage,
     url: &str,
     cookie_header: &str,
     body: Option<serde_json::Value>,
-) -> Result<T, worker::Error> {
+) -> Result<ApiResponse<T>, worker::Error> {
     let headers = Headers::new();
     headers.set("Cookie", cookie_header)?;
     headers.set("Content-Type", "application/json")?;
@@ -68,9 +103,35 @@ async fn post<T: for<'de> Deserialize<'de>>(
     }
 
     let req = Request::new_with_init(url, &init)?;
-    let mut res = Fetch::Request(req).send().await?;
-    let res_json: T = res.json().await?;
-    Ok(res_json)
+    let mut res = Fetch::Request(req).send().await.map_err(|e| {
+        log::error!("[icloud:{}] request failed: {}", stage, e);
+        e
+    })?;
+    let status = res.status_code();
+    let text = res.text().await.map_err(|e| {
+        log::error!(
+            "[icloud:{}] failed to read response body (status: {}): {}",
+            stage,
+            status,
+            e
+        );
+        e
+    })?;
+    let json: T = serde_json::from_str(&text).map_err(|e| {
+        log_failure(
+            stage,
+            status,
+            &text,
+            &format!("failed to parse response: {}", e),
+        );
+        worker::Error::from(e)
+    })?;
+    log::info!("[icloud:{}] status: {}", stage, status);
+    Ok(ApiResponse {
+        status,
+        body: text,
+        json,
+    })
 }
 
 pub async fn generate_and_reserve_hme(
@@ -85,30 +146,47 @@ pub async fn generate_and_reserve_hme(
         .append_pair("clientId", "")
         .append_pair("dsid", "");
 
-    let validate_res: ValidateResponse = post(url.as_str(), cookie_header, None).await?;
+    let validate_res: ApiResponse<ValidateResponse> =
+        post(ApiStage::Validate, url.as_str(), cookie_header, None).await?;
 
     let base_url = validate_res
+        .json
         .webservices
         .get("premiummailsettings")
         .and_then(|ws| ws.url.as_ref())
-        .ok_or_else(|| worker::Error::from("premiummailsettings URL not found"))?;
+        .ok_or_else(|| {
+            log_failure(
+                ApiStage::Validate,
+                validate_res.status,
+                &validate_res.body,
+                "premiummailsettings URL not found",
+            );
+            worker::Error::from("premiummailsettings URL not found")
+        })?;
 
     // Generate HME
     let generate_url = format!("{}/v1/hme/generate", base_url);
-    let generate_res: PremiumMailSettingsResponse<GenerateHmeResult> = post(
+    let generate_res: ApiResponse<PremiumMailSettingsResponse<GenerateHmeResult>> = post(
+        ApiStage::Generate,
         &generate_url,
         cookie_header,
         Some(serde_json::json!({ "langCode": "en-us" })),
     )
     .await?;
 
-    if !generate_res.success {
+    if !generate_res.json.success {
+        log_failure(
+            ApiStage::Generate,
+            generate_res.status,
+            &generate_res.body,
+            "success is false",
+        );
         return Err(worker::Error::from(format!(
             "Failed to generate HME: {:?}",
-            generate_res.error
+            generate_res.json.error
         )));
     }
-    let hme = generate_res.result.hme;
+    let hme = generate_res.json.result.hme;
 
     // Reserve HME
     let reserve_url = format!("{}/v1/hme/reserve", base_url);
@@ -117,15 +195,26 @@ pub async fn generate_and_reserve_hme(
         "label": label,
         "note": note
     });
-    let reserve_res: PremiumMailSettingsResponse<ReserveHmeResult> =
-        post(&reserve_url, cookie_header, Some(reserve_body)).await?;
+    let reserve_res: ApiResponse<PremiumMailSettingsResponse<ReserveHmeResult>> = post(
+        ApiStage::Reserve,
+        &reserve_url,
+        cookie_header,
+        Some(reserve_body),
+    )
+    .await?;
 
-    if !reserve_res.success {
+    if !reserve_res.json.success {
+        log_failure(
+            ApiStage::Reserve,
+            reserve_res.status,
+            &reserve_res.body,
+            "success is false",
+        );
         return Err(worker::Error::from(format!(
             "Failed to reserve HME: {:?}",
-            reserve_res.error
+            reserve_res.json.error
         )));
     }
 
-    Ok(reserve_res.result.hme)
+    Ok(reserve_res.json.result.hme)
 }
